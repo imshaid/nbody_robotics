@@ -744,6 +744,7 @@
 
         <div class="grp-label">Design</div>
         <a href="#architecture">Architecture</a>
+        <a href="#buildguide">Complete Build Guide</a>
         <a href="#topology">Topology Diagram</a>
         <a href="#addressing">IP Addressing (VLSM)</a>
 
@@ -751,16 +752,17 @@
         <a href="#devices">Device Inventory</a>
         <a href="#cabling">Port-to-Port Cabling</a>
         <a href="#configs">Router Configurations</a>
-        <a href="#switching">Switch &amp; VLAN Configs</a>
+        <a href="#switching">Switch, VLAN &amp; Wireless</a>
 
         <div class="grp-label">Services</div>
         <a href="#routing">Routing Design</a>
         <a href="#services">Network Services</a>
         <a href="#security">NAT &amp; Security</a>
+        <a href="#acl-ref">Complete ACL Reference</a>
 
         <div class="grp-label">Verification</div>
         <a href="#stats">Statistics</a>
-        <a href="#testing">Testing Log</a>
+        <a href="#testing">Testing Methodology</a>
         <a href="#troubleshoot">Troubleshooting</a>
         <a href="#conclusion">Conclusion</a>
       </nav>
@@ -775,6 +777,7 @@
             <span><b>7</b> sites</span>
             <span><b>8</b> routers</span>
             <span><b>7</b> switches</span>
+            <span><b>5</b> wireless APs</span>
             <span><b>VLSM</b> addressing</span>
             <span><b>OSPF + Static</b> routing</span>
             <span>Team Adrenaline · DIU</span>
@@ -789,8 +792,10 @@
             Office, four branch operations, a central Data Center, and a
             simulated internet edge with a remote worker. Every subnet, cable
             run, and configuration line below reflects what was actually built
-            and tested in Packet Tracer, including the routing and NAT/ACL
-            issues that came up mid-build and how each was resolved.
+            and tested in Packet Tracer, including the routing, wireless, and
+            NAT/ACL issues that came up mid-build and how each was diagnosed and
+            resolved — with the exact commands used to prove it, not just the
+            fix.
           </p>
           <div class="grid4" style="margin-top: 18px">
             <div class="stat">
@@ -798,17 +803,25 @@
               <div class="lbl">Base network</div>
             </div>
             <div class="stat">
-              <div class="num">17</div>
+              <div class="num">18</div>
               <div class="lbl">Subnets allocated</div>
             </div>
             <div class="stat">
-              <div class="num">17</div>
+              <div class="num">22</div>
               <div class="lbl">End devices</div>
             </div>
             <div class="stat">
-              <div class="num">35</div>
-              <div class="lbl">Cable runs</div>
+              <div class="num">5</div>
+              <div class="lbl">Wireless APs</div>
             </div>
+          </div>
+          <div class="note" style="margin-top: 18px">
+            <b>How to read this document:</b> every feature section below
+            follows the same pattern — <i>what it is</i>,
+            <i>why it was built this way</i>, <i>the exact configuration</i>,
+            <i>how to test it</i>, and <i>the expected result</i>. Where a
+            feature failed during build, the diagnosis path is kept in
+            <a href="#troubleshoot">Troubleshooting</a> rather than edited out.
           </div>
         </div>
 
@@ -1008,12 +1021,293 @@
               <td>Branch outage kills local operations too</td>
               <td>Branch4 runs local DHCP independent of Data Center</td>
             </tr>
+            <tr>
+              <td>Untrusted visitor devices reach internal servers</td>
+              <td>
+                Dedicated Guest VLAN (30) with an extended ACL denying every
+                internal subnet, permitting only outbound internet traffic
+              </td>
+            </tr>
+            <tr>
+              <td>One office building, no wireless coverage per site</td>
+              <td>
+                One access point per functional area (HQ, Branch1–3, Guest) —
+                coverage matches where people actually move, not a single
+                blanket AP
+              </td>
+            </tr>
           </table>
+          <p style="font-size: 0.87em; color: var(--muted); margin-top: 10px">
+            <b>Rule of thumb applied throughout:</b> segmentation (VLAN or
+            subnet) is added only where two groups of devices genuinely need
+            different trust or reachability — HQ splits Admin/IT/Guest because
+            they share one physical switch with different trust levels; each
+            branch stays a single flat /24 because every device on that branch
+            is the same function, same trust level, and segmentation there would
+            add configuration surface with no real benefit.
+          </p>
         </div>
 
-        <!-- TOPOLOGY -->
+        <!-- BUILD GUIDE -->
+        <div class="section" id="buildguide">
+          <h2>
+            <span class="idx">04</span>Complete Build Guide — Step by Step
+          </h2>
+          <p class="section-desc">
+            The order this network was actually built in, and the order it has
+            to be built in for each step to have something to attach to. Follow
+            these phases in sequence to reproduce the full topology from an
+            empty Packet Tracer canvas — each phase links to the section with
+            the full configuration detail for that step.
+          </p>
+          <div class="note">
+            <b>Why order matters here:</b> VLANs must exist before an SVI can be
+            given an IP on them; OSPF neighbors must exist before redistribution
+            has anything to propagate; NAT needs both an inside and an outside
+            interface already carrying traffic before an ACL on top of it can be
+            meaningfully tested. Building out of this order is the single
+            biggest source of "it should work but doesn't" confusion — most of
+            the entries in <a href="#troubleshoot">Troubleshooting</a> trace
+            back to a step done before its prerequisite.
+          </div>
+
+          <h3>Phase 1 — Plan the addressing before placing a single device</h3>
+          <ol>
+            <li>
+              Decide the base block (<span class="mono">10.10.0.0/16</span>) and
+              split it: /24 for every LAN/VLAN, /30 for every router-to-router
+              link. Work this out on paper first — see
+              <a href="#addressing">IP Addressing Plan</a> for the complete
+              allocation table used here.
+            </li>
+            <li>
+              Reserve the external/documentation ranges (<span class="mono"
+                >203.0.113.0/30</span
+              >, <span class="mono">198.51.100.0/30</span>) for the ISP-facing
+              links, and a separate private block (<span class="mono"
+                >172.16.99.0/24</span
+              >) for the simulated remote-worker network — keeping it visually
+              distinct from 10.10.x.x makes it obvious in any diagram which side
+              of the internet a subnet sits on.
+            </li>
+          </ol>
+
+          <h3>Phase 2 — Place devices and cable the topology</h3>
+          <ol>
+            <li>
+              Place all 8 routers, 7 switches, 5 APs, 2 servers, and end devices
+              per the layout in
+              <a href="#devices">Device Inventory</a>.
+            </li>
+            <li>
+              Cable hub-and-spoke first: HQ-R1 to Branch1–3 and to L3-Switch;
+              DataCenter-R6 to Branch4-R5 and to ISP-R7; ISP-R7 to Remote-R8 to
+              Rmt-PC. Full port-by-port list in
+              <a href="#cabling">Port-to-Port Cabling</a>.
+            </li>
+            <li>
+              Cable each branch's internal LAN — router to switch, switch to end
+              devices and to that site's AP.
+            </li>
+            <li>
+              For serial links, one side must run
+              <span class="mono">clock rate 64000</span> (the DCE end) or the
+              link stays administratively down regardless of correct IP
+              addressing — check which end is DCE in Packet Tracer before
+              assuming a link failure is an addressing problem.
+            </li>
+          </ol>
+
+          <h3>Phase 3 — Bring up basic IP connectivity and OSPF</h3>
+          <ol>
+            <li>
+              On every router, assign the planned IP/mask to each interface and
+              <span class="mono">no shutdown</span> it. Nothing else works until
+              interfaces are up — verify each one with
+              <span class="mono">show ip interface brief</span> before moving
+              on.
+            </li>
+            <li>
+              Enable OSPF process 1 on HQ-R1, Branch1-R2, Branch2-R3,
+              Branch3-R4, DataCenter-R6, and L3-Switch, advertising every
+              directly connected 10.10.x.x network into Area 0. Full per-device
+              OSPF blocks are in
+              <a href="#configs">Router Configurations</a>.
+            </li>
+            <li>
+              Confirm adjacency before doing anything else:
+              <span class="mono">show ip ospf neighbor</span> should show
+              <span class="mono">FULL</span> on every expected link. A missing
+              neighbor here means nothing built afterward (VLANs, NAT, ACLs)
+              will be reachable from other sites, so this is the first
+              checkpoint worth stopping at.
+            </li>
+            <li>
+              Configure Branch4-R5 with a static default route toward
+              DataCenter-R6 instead of OSPF (deliberate design choice — see
+              <a href="#architecture">Architecture</a>), then on DataCenter-R6
+              add <span class="mono">redistribute static subnets</span> so the
+              rest of OSPF learns Branch4's subnet. The
+              <span class="mono">subnets</span> keyword is not optional —
+              without it, VLSM-sized routes are silently excluded.
+            </li>
+          </ol>
+
+          <h3>Phase 4 — VLANs, inter-VLAN routing, and DHCP</h3>
+          <ol>
+            <li>
+              On L3-Switch: <span class="mono">ip routing</span>, create VLAN
+              10/20/30, assign each an SVI with its planned IP, and trunk the
+              link to Access-SW1.
+            </li>
+            <li>
+              On Access-SW1: create the same three VLANs, set every end-device
+              and AP-facing port to
+              <span class="mono">switchport mode access</span> with the correct
+              <span class="mono">switchport access vlan</span> — a port left on
+              the default VLAN 1 will never reach its gateway (see
+              <a href="#troubleshoot">Troubleshooting #5</a>).
+            </li>
+            <li>
+              Configure Server1 with DHCP pools for every helper-address subnet
+              (HQ VLAN10/20, Branch1–3), and
+              <span class="mono">ip helper-address 10.10.6.2</span> on each of
+              those gateway SVIs/interfaces.
+            </li>
+            <li>
+              Configure Branch4-R5 and L3-Switch (VLAN 30) each with their own
+              local DHCP pool instead of pointing at Server1 — full reasoning
+              for both independent pools in
+              <a href="#company">Company Profile</a> and
+              <a href="#switching">Switch, VLAN &amp; Wireless</a>.
+            </li>
+            <li>
+              Test every subnet's DHCP before moving on: switch one PC per site
+              from static to DHCP and confirm it lands in the correct range.
+              Full expected outputs in
+              <a href="#testing">Testing Methodology</a>.
+            </li>
+          </ol>
+
+          <h3>Phase 5 — Wireless access points</h3>
+          <ol>
+            <li>
+              Wire each AP into an access port already assigned to the correct
+              VLAN (Branch1–3 use their site's single flat VLAN; AP-HQ uses VLAN
+              20; AP-Guest uses VLAN 30).
+            </li>
+            <li>
+              Configure SSID, WPA2-PSK passphrase (minimum 8 ASCII characters),
+              AES encryption, and a non-overlapping channel (1/6/11) on each AP
+              — full table in
+              <a href="#switching">Switch, VLAN &amp; Wireless</a>.
+            </li>
+            <li>
+              Swap each wireless client's wired NIC for a wireless module in
+              Physical view, then power the PC back on and join it to its site's
+              SSID.
+            </li>
+          </ol>
+
+          <h3>Phase 6 — Guest VLAN isolation</h3>
+          <ol>
+            <li>
+              Confirm VLAN 30 and its SVI (Phase 4) and AP-Guest (Phase 5) are
+              already in place.
+            </li>
+            <li>
+              Write the extended ACL denying Guest → internal, permitting
+              everything else, and apply it inbound on the VLAN 30 SVI. Every
+              rule is listed in
+              <a href="#acl-ref">Complete ACL Reference</a>.
+            </li>
+            <li>
+              Test both directions before considering this phase done — a Guest
+              device should fail to reach any 10.10.x.x host and succeed
+              reaching anything outside that range. Skipping the "still works
+              outward" half of this test is how a too-broad deny rule goes
+              unnoticed.
+            </li>
+          </ol>
+
+          <h3>Phase 7 — NAT and the internet edge</h3>
+          <ol>
+            <li>
+              On DataCenter-R6, mark inside interfaces
+              <span class="mono">ip nat inside</span> and the ISP-facing
+              interface <span class="mono">ip nat outside</span>.
+            </li>
+            <li>
+              Configure PAT (overload) for the whole internal range and a static
+              one-to-one mapping for Server2's public-facing IP.
+            </li>
+            <li>
+              Build ISP-R7 and Remote-R8 with their own IP addressing (Remote-R8
+              running a local DHCP pool — Phase 4 pattern, not static), and
+              confirm return-path routing exists on ISP-R7 back toward both
+              10.10.0.0/16 (via DataCenter-R6) and 172.16.99.0/24 (via
+              Remote-R8) — a missing return route here produces a connection
+              that looks like it's working one-way and isn't (see
+              <a href="#troubleshoot">Troubleshooting #3</a>).
+            </li>
+          </ol>
+
+          <h3>
+            Phase 8 — The inbound ACL (build this after NAT works, not before)
+          </h3>
+          <ol>
+            <li>
+              Write the extended ACL restricting inbound traffic to Server2's
+              public IP only, and apply it on the
+              <b>same router that performs NAT translation</b> — not a separate
+              edge router. Applying it elsewhere breaks return-path matching in
+              the simulator (<a href="#troubleshoot">Troubleshooting #4</a>).
+            </li>
+            <li>
+              Test outbound-initiated traffic (a ping or browse session from
+              inside) <i>after</i> the ACL is applied, not just inbound access
+              to Server2 — the router's own return traffic is a separate case
+              the first four lines of this ACL don't cover (<a
+                href="#troubleshoot"
+                >Troubleshooting #7</a
+              >). Add the <span class="mono">echo-reply</span> /
+              <span class="mono">established</span> permit lines from
+              <a href="#acl-ref">Complete ACL Reference</a> once this gap shows
+              up.
+            </li>
+          </ol>
+
+          <h3>Phase 9 — Application services</h3>
+          <ol>
+            <li>
+              Enable DHCP, DNS, HTTP, SMTP/POP3, and FTP on the two Data Center
+              servers.
+            </li>
+            <li>
+              Point DNS A-records at Server2's IP, then verify HTTP/mail/FTP by
+              domain name (not raw IP) so DNS resolution is proven as part of
+              the same test, not assumed separately.
+            </li>
+          </ol>
+
+          <h3>Phase 10 — WAN redundancy and final verification</h3>
+          <ol>
+            <li>
+              Add the second HQ↔Branch1 serial link with a deliberately higher
+              OSPF cost, confirm the primary is preferred under normal
+              conditions, then shut the primary and confirm automatic failover.
+            </li>
+            <li>
+              Work through the full checklist in
+              <a href="#testing">Testing Methodology</a> end to end — every
+              feature, both from its own site and from at least one other site,
+              before considering the build complete.
+            </li>
+          </ol>
+        </div>
+
         <div class="section" id="topology">
-          <h2><span class="idx">04</span>Topology Diagram</h2>
+          <h2><span class="idx">05</span>Topology Diagram</h2>
           <div class="diagram-box">
             <pre>
                                           +-----------+          +------------+       +--------+
@@ -1074,7 +1368,7 @@
 
         <!-- ADDRESSING -->
         <div class="section" id="addressing">
-          <h2><span class="idx">05</span>IP Addressing Plan (VLSM)</h2>
+          <h2><span class="idx">06</span>IP Addressing Plan (VLSM)</h2>
           <p class="section-desc">
             Base block <span class="mono">10.10.0.0/16</span>. LAN subnets sized
             /24 for growth headroom; point-to-point WAN links sized /30 for an
@@ -1088,6 +1382,7 @@
               <tr>
                 <th>Site / VLAN</th>
                 <th>Network</th>
+                <th>Mask</th>
                 <th>Gateway</th>
                 <th>Usable range</th>
                 <th>DHCP pool</th>
@@ -1096,6 +1391,7 @@
               <tr>
                 <td>HQ – VLAN 10 (Admin)</td>
                 <td class="mono">10.10.0.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.0.1</td>
                 <td class="mono">.2–.254</td>
                 <td class="mono">.10–.109</td>
@@ -1104,6 +1400,7 @@
               <tr>
                 <td>HQ – VLAN 20 (IT)</td>
                 <td class="mono">10.10.1.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.1.1</td>
                 <td class="mono">.2–.254</td>
                 <td class="mono">.10–.109</td>
@@ -1112,6 +1409,7 @@
               <tr>
                 <td>Branch1 – Sales</td>
                 <td class="mono">10.10.2.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.2.1</td>
                 <td class="mono">.2–.254</td>
                 <td class="mono">.10–.109</td>
@@ -1120,6 +1418,7 @@
               <tr>
                 <td>Branch2 – R&amp;D</td>
                 <td class="mono">10.10.3.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.3.1</td>
                 <td class="mono">.2–.254</td>
                 <td class="mono">.10–.109</td>
@@ -1128,6 +1427,7 @@
               <tr>
                 <td>Branch3 – Manufacturing</td>
                 <td class="mono">10.10.4.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.4.1</td>
                 <td class="mono">.2–.254</td>
                 <td class="mono">.10–.109</td>
@@ -1136,6 +1436,7 @@
               <tr>
                 <td>Branch4 – Distribution</td>
                 <td class="mono">10.10.5.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.5.1</td>
                 <td class="mono">.2–.254</td>
                 <td class="mono">.10–.109</td>
@@ -1144,12 +1445,31 @@
               <tr>
                 <td>Data Center</td>
                 <td class="mono">10.10.6.0/24</td>
+                <td class="mono">255.255.255.0</td>
                 <td class="mono">10.10.6.1</td>
                 <td class="mono">.2–.254</td>
                 <td>—</td>
                 <td>static only</td>
               </tr>
+              <tr>
+                <td>HQ – VLAN 30 (Guest)</td>
+                <td class="mono">10.10.8.0/24</td>
+                <td class="mono">255.255.255.0</td>
+                <td class="mono">10.10.8.1</td>
+                <td class="mono">.2–.254</td>
+                <td class="mono">.10–.254</td>
+                <td>
+                  <span class="pill pill-warn">local pool (L3-Switch)</span>
+                </td>
+              </tr>
             </table>
+          </div>
+          <div class="note">
+            VLAN 30 sits on <span class="mono">10.10.8.0/24</span> rather than
+            continuing the 10.10.7.x WAN block — the /30 WAN links already
+            occupy that /24 in small increments, so Guest gets its own clean /24
+            one block further out to avoid any future overlap as more /30s are
+            added.
           </div>
 
           <h3>WAN / transit links (/30)</h3>
@@ -1158,6 +1478,7 @@
               <tr>
                 <th>Link</th>
                 <th>Network</th>
+                <th>Mask</th>
                 <th>Endpoint A</th>
                 <th>Endpoint B</th>
                 <th>Routing</th>
@@ -1165,6 +1486,7 @@
               <tr>
                 <td>HQ ↔ Branch1 (primary)</td>
                 <td class="mono">10.10.7.0/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>HQ-R1 .1</td>
                 <td>Branch1-R2 .2</td>
                 <td>OSPF cost 64</td>
@@ -1172,6 +1494,7 @@
               <tr>
                 <td>HQ ↔ Branch1 (backup)</td>
                 <td class="mono">10.10.7.24/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>HQ-R1 .25</td>
                 <td>Branch1-R2 .26</td>
                 <td>OSPF cost 100</td>
@@ -1179,6 +1502,7 @@
               <tr>
                 <td>HQ ↔ Branch2</td>
                 <td class="mono">10.10.7.4/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>HQ-R1 .5</td>
                 <td>Branch2-R3 .6</td>
                 <td>OSPF</td>
@@ -1186,6 +1510,7 @@
               <tr>
                 <td>HQ ↔ Branch3</td>
                 <td class="mono">10.10.7.8/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>HQ-R1 .9</td>
                 <td>Branch3-R4 .10</td>
                 <td>OSPF</td>
@@ -1193,6 +1518,7 @@
               <tr>
                 <td>HQ ↔ Data Center</td>
                 <td class="mono">10.10.7.12/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>HQ-R1 .13</td>
                 <td>DataCenter-R6 .14</td>
                 <td>OSPF</td>
@@ -1200,6 +1526,7 @@
               <tr>
                 <td>Data Center ↔ Branch4</td>
                 <td class="mono">10.10.7.16/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>DataCenter-R6 .17</td>
                 <td>Branch4-R5 .18</td>
                 <td>Static + redistribute</td>
@@ -1207,12 +1534,19 @@
               <tr>
                 <td>HQ ↔ L3-Switch (transit)</td>
                 <td class="mono">10.10.7.28/30</td>
+                <td class="mono">255.255.255.252</td>
                 <td>HQ-R1 .29</td>
                 <td>L3-Switch .30</td>
                 <td>OSPF</td>
               </tr>
             </table>
           </div>
+          <p style="font-size: 0.87em; color: var(--muted)">
+            Every point-to-point link uses <span class="mono">/30</span> —
+            exactly 2 usable addresses, 0 wasted. Sizing any of these as a /24
+            (254 usable) would burn 252 addresses per link for no reason; across
+            7 WAN links that's over 1,760 wasted addresses avoided by VLSM.
+          </p>
 
           <h3>External / ISP zone</h3>
           <div class="tbl-wrap">
@@ -1220,35 +1554,63 @@
               <tr>
                 <th>Segment</th>
                 <th>Network</th>
+                <th>Mask</th>
+                <th>Endpoint A</th>
+                <th>Endpoint B</th>
                 <th>Note</th>
               </tr>
               <tr>
                 <td>ISP ↔ Data Center</td>
                 <td class="mono">203.0.113.0/30</td>
+                <td class="mono">255.255.255.252</td>
+                <td>ISP-R7 .1</td>
+                <td>DataCenter-R6 .2</td>
                 <td>RFC 5737 documentation range</td>
               </tr>
               <tr>
                 <td>ISP ↔ Remote Worker</td>
                 <td class="mono">198.51.100.0/30</td>
+                <td class="mono">255.255.255.252</td>
+                <td>ISP-R7 .1</td>
+                <td>Remote-R8 .2</td>
                 <td>RFC 5737 documentation range</td>
               </tr>
               <tr>
                 <td>Remote Worker LAN</td>
                 <td class="mono">172.16.99.0/24</td>
-                <td>Static IP, classful mask kept per lab convention</td>
+                <td class="mono">255.255.255.0</td>
+                <td>Remote-R8 .1 (gateway)</td>
+                <td>Rmt-PC (DHCP)</td>
+                <td>
+                  Remote-R8 runs a local DHCP pool, simulating a home/hotel
+                  router — Rmt-PC is a DHCP client, not a static host (see note
+                  below)
+                </td>
               </tr>
               <tr>
                 <td>Static NAT public IP</td>
                 <td class="mono">203.0.113.10</td>
-                <td>Maps to Server2 (10.10.6.3)</td>
+                <td>/32</td>
+                <td colspan="2">Maps to Server2 (10.10.6.3)</td>
               </tr>
             </table>
+          </div>
+          <div class="note">
+            <b>Design note — why the remote worker is DHCP, not static:</b>
+            the first pass had Rmt-PC hardcoded with a static IP. That's not how
+            a real remote worker connects — at home or in a hotel, the local
+            router (here, Remote-R8) hands out an address dynamically; the
+            employee's laptop never has a pre-known IP. Remote-R8 was
+            reconfigured to run its own DHCP pool on
+            <span class="mono">172.16.99.0/24</span> so Rmt-PC picks up an
+            address the same way a real laptop would on an unfamiliar network.
+            Full config in <a href="#configs">Router Configurations</a>.
           </div>
         </div>
 
         <!-- DEVICES -->
         <div class="section" id="devices">
-          <h2><span class="idx">06</span>Device Inventory</h2>
+          <h2><span class="idx">07</span>Device Inventory</h2>
           <div class="grid3">
             <div class="chart-card">
               <h4>Devices by type</h4>
@@ -1310,7 +1672,7 @@
                 <td class="mono">AP-Branch1</td>
                 <td>Cisco AP-PT</td>
                 <td>Branch1</td>
-                <td>WPA2-PSK wireless, SSID AxionDynamics-Sales</td>
+                <td>WPA2-PSK wireless, SSID nBodyRobotics-Sales</td>
               </tr>
               <tr>
                 <td class="mono">Branch2-R3</td>
@@ -1322,7 +1684,13 @@
                 <td class="mono">SW-Branch2</td>
                 <td>Cisco 2960-24TT</td>
                 <td>Branch2</td>
-                <td>LAN switch</td>
+                <td>LAN switch + AP uplink</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-Branch2</td>
+                <td>Cisco AP-PT</td>
+                <td>Branch2</td>
+                <td>WPA2-PSK wireless, SSID nBodyRobotics-RnD</td>
               </tr>
               <tr>
                 <td class="mono">Branch3-R4</td>
@@ -1334,7 +1702,13 @@
                 <td class="mono">SW-Branch3</td>
                 <td>Cisco 2960-24TT</td>
                 <td>Branch3</td>
-                <td>LAN switch</td>
+                <td>LAN switch + AP uplink</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-Branch3</td>
+                <td>Cisco AP-PT</td>
+                <td>Branch3</td>
+                <td>WPA2-PSK wireless, SSID nBodyRobotics-Mfg</td>
               </tr>
               <tr>
                 <td class="mono">Branch4-R5</td>
@@ -1373,6 +1747,18 @@
                 <td>HTTP + Mail + FTP — 10.10.6.3</td>
               </tr>
               <tr>
+                <td class="mono">AP-HQ</td>
+                <td>Cisco AP-PT</td>
+                <td>HQ (VLAN 20)</td>
+                <td>WPA2-PSK wireless, SSID nBodyRobotics-HQ</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-Guest</td>
+                <td>Cisco AP-PT</td>
+                <td>HQ (VLAN 30)</td>
+                <td>WPA2-PSK wireless, SSID nBodyRobotics-Guest, isolated</td>
+              </tr>
+              <tr>
                 <td class="mono">ISP-R7</td>
                 <td>Cisco 2911</td>
                 <td>Edge</td>
@@ -1397,30 +1783,39 @@
               </tr>
               <tr>
                 <td>HQ VLAN10 (Admin)</td>
-                <td class="mono">Adm-PC1, Adm-PC2</td>
+                <td class="mono">Adm-PC1, Adm-PC2, Adm-Printer1</td>
                 <td>DHCP via Server1</td>
               </tr>
               <tr>
                 <td>HQ VLAN20 (IT)</td>
-                <td class="mono">IT-PC1</td>
-                <td>DHCP via Server1</td>
+                <td class="mono">IT-PC1, IT-Lap1 (wireless, AP-HQ)</td>
+                <td>DHCP via Server1 / AP-HQ</td>
+              </tr>
+              <tr>
+                <td>HQ VLAN30 (Guest)</td>
+                <td class="mono">Guest-Lap1 (wireless, AP-Guest)</td>
+                <td>DHCP via L3-Switch local pool — internet only</td>
               </tr>
               <tr>
                 <td>Branch1 (Sales)</td>
                 <td class="mono">
-                  Sale-PC1, Sale-PC2, Sale-PC3, Sale-Lap1 (wireless)
+                  Sale-PC1, Sale-PC2, Sale-PC3, Sale-Lap1 (wireless, AP-Branch1)
                 </td>
                 <td>DHCP via Server1 / AP</td>
               </tr>
               <tr>
                 <td>Branch2 (R&amp;D)</td>
-                <td class="mono">RnD-PC1 … RnD-PC4</td>
-                <td>DHCP via Server1</td>
+                <td class="mono">
+                  RnD-PC1, RnD-PC2, RnD-PC3, RnD-Lap1 (wireless, AP-Branch2)
+                </td>
+                <td>DHCP via Server1 / AP</td>
               </tr>
               <tr>
                 <td>Branch3 (Manufacturing)</td>
-                <td class="mono">Mfg-PC1 … Mfg-PC3</td>
-                <td>DHCP via Server1</td>
+                <td class="mono">
+                  Mfg-PC1, Mfg-PC2, Mfg-Lap1 (wireless, AP-Branch3)
+                </td>
+                <td>DHCP via Server1 / AP</td>
               </tr>
               <tr>
                 <td>Branch4 (Distribution)</td>
@@ -1430,15 +1825,25 @@
               <tr>
                 <td>Remote</td>
                 <td class="mono">Rmt-PC</td>
-                <td>Static IP (172.16.99.10)</td>
+                <td>
+                  DHCP via Remote-R8 local pool (172.16.99.0/24) — simulates a
+                  home/hotel network, not a company-managed subnet
+                </td>
               </tr>
             </table>
           </div>
+          <p style="font-size: 0.87em; color: var(--muted)">
+            One wireless client was added per functional area rather than
+            leaving wireless coverage at Branch1 only — Branch2/Branch3 each
+            replaced one wired seat with a mobile device (floor supervisor/lab
+            laptop use case) instead of growing the device count, keeping the
+            topology's original scale intact.
+          </p>
         </div>
 
         <!-- CABLING -->
         <div class="section" id="cabling">
-          <h2><span class="idx">07</span>Port-to-Port Cabling</h2>
+          <h2><span class="idx">08</span>Port-to-Port Cabling</h2>
           <p class="section-desc">
             Every physical connection in the topology, in the order they were
             built: HQ core first, then WAN links out to each branch, then each
@@ -1718,7 +2123,7 @@
 
         <!-- CONFIGS -->
         <div class="section" id="configs">
-          <h2><span class="idx">08</span>Router Configurations</h2>
+          <h2><span class="idx">09</span>Router Configurations</h2>
           <p class="section-desc">
             Full running-config excerpts for every router, as applied and
             verified. Click a router to expand.
@@ -1938,10 +2343,12 @@ ip nat inside source list 1 interface GigabitEthernet0/1 overload
 ip nat inside source static 10.10.6.3 203.0.113.10
 !
 ip access-list extended INBOUND-FILTER
- permit tcp any host 203.0.113.10
- permit udp any host 203.0.113.10
- permit icmp any host 203.0.113.10
- deny ip any any
+ 10 permit tcp any host 203.0.113.10
+ 20 permit udp any host 203.0.113.10
+ 30 permit icmp any host 203.0.113.10
+ 35 permit icmp any host 203.0.113.2 echo-reply
+ 36 permit tcp any host 203.0.113.2 established
+ 40 deny ip any any
 !
 router ospf 1
  network 10.10.6.0 0.0.0.255 area 0
@@ -1950,6 +2357,15 @@ router ospf 1
  redistribute static subnets
  default-information originate</pre
               >
+              <div class="note">
+                Rule sequence numbers 35–36 were added <i>after</i> the initial
+                10/20/30/40 set, once the router's own return traffic turned out
+                to be silently dropped by the deny-all — see
+                <a href="#acl-ref">Complete ACL Reference</a> for every rule in
+                this project laid out together, and
+                <a href="#troubleshoot">Troubleshooting #7</a> for how it was
+                found.
+              </div>
             </div>
           </details>
 
@@ -1987,7 +2403,9 @@ ip route 172.16.99.0 255.255.255.0 198.51.100.2</pre
           <details>
             <summary>
               Remote-R8
-              <span class="pill pill-info">Remote worker gateway</span>
+              <span class="pill pill-info"
+                >Remote worker gateway — home router simulation</span
+              >
             </summary>
             <div class="inner">
               <pre class="block">
@@ -1999,23 +2417,59 @@ interface GigabitEthernet0/0
  no shutdown
 !
 interface GigabitEthernet0/1
- ip address 172.16.99.1 255.255.0.0
+ ip address 172.16.99.1 255.255.255.0
  description Link-to-RemotePC
  no shutdown
 !
+ip dhcp excluded-address 172.16.99.1
+!
+ip dhcp pool HOME-POOL
+ network 172.16.99.0 255.255.255.0
+ default-router 172.16.99.1
+ dns-server 10.10.6.2
+!
 ip route 0.0.0.0 0.0.0.0 198.51.100.1</pre
               >
+              <div class="note">
+                Remote-R8 stands in for a home/hotel router — its own DHCP pool
+                hands Rmt-PC an address dynamically, the way a real ISP-supplied
+                router would, rather than the employee's laptop arriving with a
+                pre-known static IP. Getting this to actually hand out addresses
+                took a second pass — see
+                <a href="#troubleshoot">Troubleshooting #8</a>.
+              </div>
             </div>
           </details>
         </div>
 
         <!-- SWITCHING -->
         <div class="section" id="switching">
-          <h2><span class="idx">09</span>Switch &amp; VLAN Configuration</h2>
+          <h2>
+            <span class="idx">10</span>Switch, VLAN &amp; Wireless Configuration
+          </h2>
+          <p class="section-desc">
+            Three VLANs at HQ (Admin, IT, Guest) routed at Layer 3 by L3-Switch,
+            plus five wireless access points — one per functional area rather
+            than a single blanket AP for the whole building.
+          </p>
+
+          <h3>Why L3 switching instead of router-on-a-stick</h3>
+          <p>
+            Inter-VLAN routing runs on L3-Switch's own SVIs (<span class="mono"
+              >interface Vlan10</span
+            >, <span class="mono">Vlan20</span>,
+            <span class="mono">Vlan30</span>) rather than a single trunk back to
+            a router subinterface. With three VLANs and growing, a
+            router-on-a-stick setup forces every inter-VLAN packet through one
+            physical link twice (switch→router, router→switch) — that link
+            becomes the bottleneck. SVIs route at backplane speed inside the
+            switch itself, with no such choke point.
+          </p>
 
           <details open>
             <summary>
-              L3-Switch <span class="pill pill-dev">Inter-VLAN routing</span>
+              L3-Switch
+              <span class="pill pill-dev">Inter-VLAN routing + Guest ACL</span>
             </summary>
             <div class="inner">
               <pre class="block">
@@ -2026,6 +2480,8 @@ vlan 10
  name Admin
 vlan 20
  name IT
+vlan 30
+ name Guest
 !
 interface Vlan10
  ip address 10.10.0.1 255.255.255.0
@@ -2037,6 +2493,11 @@ interface Vlan20
  ip helper-address 10.10.6.2
  no shutdown
 !
+interface Vlan30
+ ip address 10.10.8.1 255.255.255.0
+ ip access-group 130 in
+ no shutdown
+!
 interface GigabitEthernet0/1
  no switchport
  ip address 10.10.7.30 255.255.255.252
@@ -2045,19 +2506,45 @@ interface GigabitEthernet0/1
 interface GigabitEthernet0/2
  switchport trunk encapsulation dot1q
  switchport mode trunk
+ switchport trunk allowed vlan add 30
  no shutdown
+!
+ip dhcp excluded-address 10.10.8.1 10.10.8.9
+!
+ip dhcp pool GUEST-POOL
+ network 10.10.8.0 255.255.255.0
+ default-router 10.10.8.1
+ dns-server 8.8.8.8
+!
+access-list 130 deny ip 10.10.8.0 0.0.0.255 10.10.0.0 0.0.255.255
+access-list 130 permit ip any any
 !
 router ospf 1
  network 10.10.0.0 0.0.0.255 area 0
  network 10.10.1.0 0.0.0.255 area 0
+ network 10.10.8.0 0.0.0.255 area 0
  network 10.10.7.28 0.0.0.3 area 0</pre
               >
+              <div class="note">
+                Guest is deliberately given its own local DHCP pool (not
+                Server1) and a public DNS resolver (8.8.8.8, not the internal
+                10.10.6.2) — isolation should be as complete as possible, so a
+                guest device never even learns the internal DNS server exists.
+                <span class="mono">access-list 130</span> is an
+                <b>extended</b> ACL, not standard — a standard ACL can only
+                match source, but this rule needs to match both source (Guest)
+                <i>and</i> destination (internal ranges only), which only an
+                extended ACL can do.
+              </div>
             </div>
           </details>
 
           <details>
             <summary>
-              Access-SW1 <span class="pill pill-info">HQ access layer</span>
+              Access-SW1
+              <span class="pill pill-info"
+                >HQ access layer, 3 VLANs + AP uplinks</span
+              >
             </summary>
             <div class="inner">
               <pre class="block">
@@ -2067,9 +2554,12 @@ vlan 10
  name Admin
 vlan 20
  name IT
+vlan 30
+ name Guest
 !
 interface GigabitEthernet1/1
  switchport mode trunk
+ switchport trunk allowed vlan add 30
  no shutdown
 !
 interface FastEthernet0/1
@@ -2080,49 +2570,179 @@ interface FastEthernet0/2
  switchport access vlan 10
 interface FastEthernet0/3
  switchport mode access
- switchport access vlan 20</pre
+ switchport access vlan 20
+interface FastEthernet0/4
+ switchport mode access
+ switchport access vlan 20
+ description Uplink to AP-HQ
+interface FastEthernet0/5
+ switchport mode access
+ switchport access vlan 30
+ description Uplink to AP-Guest
+interface FastEthernet0/6
+ switchport mode access
+ switchport access vlan 10
+ description Uplink to Adm-Printer1</pre
               >
+              <div class="note">
+                Every new wired or wireless uplink needs its access port
+                explicitly assigned to the right VLAN — a port left on the
+                default VLAN 1 has no gateway configured anywhere and will never
+                reach anything, even if the device's own IP settings are
+                perfect. This exact mistake happened while wiring up the
+                printer; see
+                <a href="#troubleshoot">Troubleshooting #5</a>.
+              </div>
             </div>
           </details>
 
-          <details>
-            <summary>
-              AP-Branch1 <span class="pill pill-info">Wireless</span>
-            </summary>
-            <div class="inner">
-              <table>
-                <tr>
-                  <th>Setting</th>
-                  <th>Value</th>
-                </tr>
-                <tr>
-                  <td>SSID</td>
-                  <td class="mono">AxionDynamics-Sales</td>
-                </tr>
-                <tr>
-                  <td>Channel</td>
-                  <td>6</td>
-                </tr>
-                <tr>
-                  <td>Authentication</td>
-                  <td>WPA2-PSK</td>
-                </tr>
-                <tr>
-                  <td>Passphrase</td>
-                  <td class="mono">sales@123</td>
-                </tr>
-                <tr>
-                  <td>Encryption</td>
-                  <td>AES</td>
-                </tr>
-              </table>
-            </div>
-          </details>
+          <h3>Wireless access points</h3>
+          <p>
+            One AP per functional area — HQ (IT devices), Guest, and each of
+            Branch1–3 — rather than leaving wireless coverage at a single site.
+            Each SSID carries the company name and site so a user picking a
+            network from a phone's WiFi list can immediately tell which one is
+            theirs.
+          </p>
+          <div class="tbl-wrap">
+            <table>
+              <tr>
+                <th>AP</th>
+                <th>Site / VLAN</th>
+                <th>Uplink port</th>
+                <th>SSID</th>
+                <th>Passphrase</th>
+                <th>Channel</th>
+                <th>Auth / Encryption</th>
+              </tr>
+              <tr>
+                <td class="mono">AP-Branch1</td>
+                <td>Branch1 (10.10.2.0/24)</td>
+                <td>SW-Branch1 Fa0/1</td>
+                <td class="mono">nBodyRobotics-Sales</td>
+                <td class="mono">sales@2026</td>
+                <td>6</td>
+                <td>WPA2-PSK / AES</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-HQ</td>
+                <td>HQ VLAN 20 – IT (10.10.1.0/24)</td>
+                <td>Access-SW1 Fa0/4</td>
+                <td class="mono">nBodyRobotics-HQ</td>
+                <td class="mono">admin@2026</td>
+                <td>1</td>
+                <td>WPA2-PSK / AES</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-Branch2</td>
+                <td>Branch2 (10.10.3.0/24)</td>
+                <td>SW-Branch2 Fa0/5</td>
+                <td class="mono">nBodyRobotics-RnD</td>
+                <td class="mono">rnd@2026</td>
+                <td>11</td>
+                <td>WPA2-PSK / AES</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-Branch3</td>
+                <td>Branch3 (10.10.4.0/24)</td>
+                <td>SW-Branch3 Fa0/5</td>
+                <td class="mono">nBodyRobotics-Mfg</td>
+                <td class="mono">mfg@2026</td>
+                <td>6</td>
+                <td>WPA2-PSK / AES</td>
+              </tr>
+              <tr>
+                <td class="mono">AP-Guest</td>
+                <td>HQ VLAN 30 – Guest (10.10.8.0/24)</td>
+                <td>Access-SW1 Fa0/5</td>
+                <td class="mono">nBodyRobotics-Guest</td>
+                <td class="mono">guest@2026</td>
+                <td>11</td>
+                <td>WPA2-PSK / AES</td>
+              </tr>
+            </table>
+          </div>
+          <p style="font-size: 0.87em; color: var(--muted)">
+            Channels 1, 6, and 11 are the only three non-overlapping channels in
+            the 2.4 GHz band — neighbouring APs alternate between them to avoid
+            co-channel interference. All five passphrases follow one
+            <span class="mono">{role}@2026</span> convention (9 characters,
+            clears the WPA2 8–63 ASCII minimum).
+          </p>
+
+          <h3>Wireless AP is single-VLAN — why five physical APs, not one</h3>
+          <p>
+            The AP-PT model in Packet Tracer serves exactly one SSID mapped to
+            exactly one VLAN — it can't broadcast multiple SSIDs on different
+            VLANs the way a real enterprise AP or WLC-managed AP can. Wiring
+            AP-HQ and AP-Guest into different access ports on Access-SW1 (VLAN
+            20 vs VLAN 30) is the workaround: two physical radios standing in
+            for what a single multi-SSID AP would normally do.
+          </p>
+
+          <h3>Test — wireless client join and IP assignment</h3>
+          <div class="cfg-head">
+            <span>Any Lap1 → Desktop → IP Configuration → DHCP</span
+            ><span>expected</span>
+          </div>
+          <pre class="block">
+DHCP request successful.
+IPv4 Address .... &lt;correct subnet for that AP&gt;
+Subnet Mask ..... 255.255.255.0
+Default Gateway . &lt;site gateway&gt;
+DNS Server ...... 10.10.6.2   (8.8.8.8 for Guest-Lap1 only)</pre
+          >
+          <p style="font-size: 0.87em">
+            Rule to verify by: every wireless client should land in the exact
+            same subnet as the wired PCs on that same site — wireless is a
+            different access medium, not a different network.
+          </p>
+
+          <h3>Test — Guest VLAN isolation (both directions)</h3>
+          <div class="tbl-wrap">
+            <table>
+              <tr>
+                <th>From Guest-Lap1</th>
+                <th>Expected result</th>
+                <th>Why</th>
+              </tr>
+              <tr>
+                <td class="mono">ping 10.10.0.10</td>
+                <td>
+                  <span class="pill pill-ok">Destination host unreachable</span>
+                </td>
+                <td>ACL 130 denies Guest → any 10.10.0.0/16 address</td>
+              </tr>
+              <tr>
+                <td class="mono">ping 10.10.6.2</td>
+                <td>
+                  <span class="pill pill-ok">Destination host unreachable</span>
+                </td>
+                <td>Internal DNS/DHCP server, still inside the denied range</td>
+              </tr>
+              <tr>
+                <td class="mono">ping 198.51.100.2</td>
+                <td><span class="pill pill-ok">Reply received</span></td>
+                <td>Outside 10.10.0.0/16 — falls through to the permit rule</td>
+              </tr>
+            </table>
+          </div>
+          <div class="note">
+            A blocked ping from Guest returns
+            <span class="mono">Destination host unreachable</span>, sent by the
+            gateway (10.10.8.1) itself — the packet never actually leaves the
+            local segment. That's different from a
+            <span class="mono">Request timed out</span>, which means the packet
+            was allowed out but nothing answered; only the first pattern proves
+            the ACL is doing the blocking. See
+            <a href="#troubleshoot">Troubleshooting #6</a> for the case where
+            this distinction mattered.
+          </div>
         </div>
 
         <!-- ROUTING -->
         <div class="section" id="routing">
-          <h2><span class="idx">10</span>Routing Design</h2>
+          <h2><span class="idx">11</span>Routing Design</h2>
           <div class="tbl-wrap">
             <table>
               <tr>
@@ -2185,7 +2805,7 @@ O    10.10.6.0/24 [110/129] via 10.10.7.1, 02:27:41, Serial0/0/0</pre
 
         <!-- SERVICES -->
         <div class="section" id="services">
-          <h2><span class="idx">11</span>Network Services</h2>
+          <h2><span class="idx">12</span>Network Services</h2>
           <div class="tabs" id="svcTabs">
             <button class="tab-btn active" data-tab="t-dhcp">DHCP</button>
             <button class="tab-btn" data-tab="t-dns">DNS</button>
@@ -2319,29 +2939,44 @@ ftp&gt;get c2960-lanbase-mz.122-25.FX.bin
 
           <div id="t-wifi" class="tab-panel">
             <p>
-              Sale-Lap1's built-in FastEthernet NIC was swapped for a WPC300N
-              wireless module, then connected to AP-Branch1 with matching
-              SSID/passphrase.
+              Five APs total — Branch1, HQ (VLAN 20), Branch2, Branch3, and a
+              dedicated Guest AP — each laptop's built-in NIC swapped for a
+              wireless module and matched to its site's SSID/passphrase. Full
+              AP-by-AP config, channel plan, and the Guest isolation test live
+              in
+              <a href="#switching">Switch, VLAN &amp; Wireless Configuration</a
+              >.
             </p>
             <div class="cfg-head">
               <span>Sale-Lap1 → Wireless0</span><span>result</span>
             </div>
             <pre class="block">
-SSID: AxionDynamics-Sales   Auth: WPA2-PSK   Enc: AES
+SSID: nBodyRobotics-Sales   Auth: WPA2-PSK   Enc: AES
 IP Address ..... 10.10.2.13
 Default Gateway . 10.10.2.1
 DNS Server ...... 10.10.6.2</pre
             >
+            <div class="cfg-head">
+              <span>Guest-Lap1 → Wireless0</span><span>result</span>
+            </div>
+            <pre class="block">
+SSID: nBodyRobotics-Guest   Auth: WPA2-PSK   Enc: AES
+IP Address ..... 10.10.8.10
+Default Gateway . 10.10.8.1
+DNS Server ...... 8.8.8.8   (public, not the internal server — by design)</pre
+            >
             <p style="font-size: 0.87em">
-              Same subnet, same DHCP pool, same services as the wired PCs on the
-              same LAN — only the access medium differs.
+              Wired vs. wireless PCs on the same site land on identical subnets,
+              gateways, and DHCP pools — only the access medium differs. Guest
+              is the one exception: separate subnet, separate DNS, and an ACL
+              boundary the wired VLANs don't have.
             </p>
           </div>
         </div>
 
         <!-- SECURITY -->
         <div class="section" id="security">
-          <h2><span class="idx">12</span>NAT &amp; Security</h2>
+          <h2><span class="idx">13</span>NAT &amp; Security</h2>
           <div class="grid2">
             <div>
               <h3>NAT</h3>
@@ -2373,39 +3008,304 @@ Pro Inside global   Inside local   Outside local  Outside global
               >
             </div>
             <div>
-              <h3>ACL</h3>
-              <div class="tbl-wrap">
-                <table>
-                  <tr>
-                    <th>Applied on</th>
-                    <th>Direction</th>
-                    <th>Effect</th>
-                  </tr>
-                  <tr>
-                    <td>DataCenter-R6 Gi0/1</td>
-                    <td>inbound</td>
-                    <td>
-                      Only traffic to 203.0.113.10 permitted; everything else
-                      denied
-                    </td>
-                  </tr>
-                </table>
+              <h3>ACL — INBOUND-FILTER (DataCenter-R6)</h3>
+              <div class="cfg-head">
+                <span>DataCenter-R6# show access-lists</span>
               </div>
+              <pre class="block">
+Extended IP access list INBOUND-FILTER
+    10 permit tcp any host 203.0.113.10
+    20 permit udp any host 203.0.113.10
+    30 permit icmp any host 203.0.113.10
+    35 permit icmp any host 203.0.113.2 echo-reply
+    36 permit tcp any host 203.0.113.2 established
+    40 deny ip any any</pre
+              >
+              <table>
+                <tr>
+                  <th>Applied on</th>
+                  <th>Direction</th>
+                  <th>Effect</th>
+                </tr>
+                <tr>
+                  <td>DataCenter-R6 Gi0/1</td>
+                  <td>inbound</td>
+                  <td>
+                    Public-facing services (203.0.113.10) permitted; the
+                    router's own address (203.0.113.2) only answers its own
+                    outbound-initiated traffic; everything else denied
+                  </td>
+                </tr>
+              </table>
             </div>
           </div>
+
+          <h3>Why lines 35–36 exist — hardening the return path</h3>
+          <p>
+            The original 4-line ACL (lines 10–30 + deny-all) only permitted
+            traffic <i>to</i> Server2's public IP. It didn't account for traffic
+            DataCenter-R6 <i>itself</i> initiates outbound — pings to the ISP,
+            or PAT-translated browsing from internal hosts — whose replies come
+            back addressed to the router's own interface (203.0.113.2), not to
+            Server2. Those replies matched no permit rule and fell into the
+            deny-all, breaking outbound connectivity for the entire internal
+            network even though NAT itself was translating correctly. Lines 35
+            and 36 close that gap: <span class="mono">echo-reply</span> permits
+            ping responses specifically (not new inbound pings), and
+            <span class="mono">established</span> permits only TCP replies to
+            connections the inside network opened first — new inbound TCP
+            connections to 203.0.113.2 are still denied.
+          </p>
           <div class="note">
-            <b>Placement decision:</b> the ACL is applied on the same router
-            that performs NAT translation (Data Center-R6), not on the separate
-            ISP edge router where it was first configured. Splitting NAT and ACL
-            enforcement across two routers caused return traffic to fail
-            matching in the simulator. Full trail in
+            <b>Known limitation:</b> Cisco's classic extended ACL has no
+            <span class="mono">established</span>-equivalent for UDP, since UDP
+            carries no connection-state flag to key off. A fully stateful
+            version of this rule would need a
+            <span class="mono">reflexive ACL</span>; that's flagged here as a
+            deliberate scope boundary rather than an oversight — see
+            <a href="#troubleshoot">Troubleshooting #7</a> for the diagnosis
+            that led here.
+          </div>
+
+          <h3>ACL 130 — Guest VLAN isolation (L3-Switch)</h3>
+          <p>
+            A second, independent ACL enforces the Guest boundary — full config,
+            rule-by-rule breakdown, and the two-direction test are in
+            <a href="#switching">Switch, VLAN &amp; Wireless Configuration</a>.
+            The two ACLs solve different problems: INBOUND-FILTER controls what
+            the <i>internet</i> can reach inside the network; ACL 130 controls
+            what an <i>internal but untrusted</i> VLAN can reach.
+          </p>
+
+          <div class="note">
+            <b>Placement decision:</b> INBOUND-FILTER is applied on the same
+            router that performs NAT translation (Data Center-R6), not on the
+            separate ISP edge router where it was first configured. Splitting
+            NAT and ACL enforcement across two routers caused return traffic to
+            fail matching in the simulator. Full trail in
             <a href="#troubleshoot">Troubleshooting</a>.
           </div>
         </div>
 
-        <!-- STATS -->
+        <!-- ACL REFERENCE -->
+        <div class="section" id="acl-ref">
+          <h2><span class="idx">14</span>Complete ACL Reference</h2>
+          <p class="section-desc">
+            Every access list used anywhere in this network, in one place —
+            three ACLs total, each solving a different problem. Nothing here is
+            duplicated logic; each one exists because the other two don't cover
+            its case.
+          </p>
+
+          <div class="tbl-wrap">
+            <table>
+              <tr>
+                <th>ACL</th>
+                <th>Type</th>
+                <th>Router</th>
+                <th>Applied on / direction</th>
+                <th>Purpose</th>
+              </tr>
+              <tr>
+                <td class="mono">1</td>
+                <td>Standard</td>
+                <td>DataCenter-R6</td>
+                <td>Referenced by the PAT statement, not interface-applied</td>
+                <td>Defines which internal hosts qualify for PAT overload</td>
+              </tr>
+              <tr>
+                <td class="mono">INBOUND-FILTER</td>
+                <td>Extended (named)</td>
+                <td>DataCenter-R6</td>
+                <td>GigabitEthernet0/1, inbound</td>
+                <td>
+                  Restricts what the internet can initiate toward the internal
+                  network; separately permits the router's own return traffic
+                </td>
+              </tr>
+              <tr>
+                <td class="mono">130</td>
+                <td>Extended (numbered)</td>
+                <td>L3-Switch</td>
+                <td>Interface Vlan30, inbound</td>
+                <td>Isolates Guest VLAN from every internal 10.10.x.x range</td>
+              </tr>
+            </table>
+          </div>
+
+          <h3>ACL 1 — Standard, PAT qualification</h3>
+          <div class="cfg-head">
+            <span>DataCenter-R6</span><span>config</span>
+          </div>
+          <pre class="block">
+access-list 1 permit 10.10.0.0 0.0.255.255
+ip nat inside source list 1 interface GigabitEthernet0/1 overload</pre
+          >
+          <p>
+            A standard ACL can only match source address, which is all PAT
+            qualification needs — any packet whose source falls inside
+            10.10.0.0/16 is eligible for overload translation outbound. This is
+            not a security boundary; it exists purely to define the scope of
+            PAT.
+          </p>
+
+          <h3>INBOUND-FILTER — Extended, internet-edge firewall</h3>
+          <div class="cfg-head">
+            <span>DataCenter-R6 Gi0/1, inbound</span><span>final ruleset</span>
+          </div>
+          <pre class="block">
+ip access-list extended INBOUND-FILTER
+ 10 permit tcp any host 203.0.113.10
+ 20 permit udp any host 203.0.113.10
+ 30 permit icmp any host 203.0.113.10
+ 35 permit icmp any host 203.0.113.2 echo-reply
+ 36 permit tcp any host 203.0.113.2 established
+ 40 deny ip any any</pre
+          >
+          <div class="tbl-wrap">
+            <table>
+              <tr>
+                <th>Seq</th>
+                <th>Rule</th>
+                <th>What it allows in</th>
+                <th>Why it's needed</th>
+              </tr>
+              <tr>
+                <td class="mono">10</td>
+                <td class="mono">permit tcp any host 203.0.113.10</td>
+                <td>Any TCP to Server2's public IP</td>
+                <td>HTTP and FTP control/data connections</td>
+              </tr>
+              <tr>
+                <td class="mono">20</td>
+                <td class="mono">permit udp any host 203.0.113.10</td>
+                <td>Any UDP to Server2's public IP</td>
+                <td>DNS and some FTP passive-mode traffic</td>
+              </tr>
+              <tr>
+                <td class="mono">30</td>
+                <td class="mono">permit icmp any host 203.0.113.10</td>
+                <td>ICMP to Server2's public IP</td>
+                <td>Lets remote/ISP-side hosts ping Server2 for testing</td>
+              </tr>
+              <tr>
+                <td class="mono">35</td>
+                <td class="mono">
+                  permit icmp any host 203.0.113.2 echo-reply
+                </td>
+                <td>Reply packets only, to the router's own IP</td>
+                <td>
+                  Lets DataCenter-R6's own outbound pings receive their replies
+                  — <b>not</b> a hole for new inbound pings to the router, only
+                  replies to pings it started
+                </td>
+              </tr>
+              <tr>
+                <td class="mono">36</td>
+                <td class="mono">
+                  permit tcp any host 203.0.113.2 established
+                </td>
+                <td>TCP replies only, to the router's own IP</td>
+                <td>
+                  Lets PAT-translated outbound sessions (internal hosts browsing
+                  out) receive their replies; a brand-new inbound TCP SYN to
+                  203.0.113.2 still matches nothing here and falls through to
+                  line 40
+                </td>
+              </tr>
+              <tr>
+                <td class="mono">40</td>
+                <td class="mono">deny ip any any</td>
+                <td>Everything else</td>
+                <td>
+                  Default posture: nothing reaches the internal network or the
+                  router itself from outside unless explicitly permitted above
+                </td>
+              </tr>
+            </table>
+          </div>
+          <div class="note">
+            <b>What this ACL deliberately does not do:</b> UDP has no
+            connection-state flag, so there is no UDP equivalent of line 36 — a
+            reflexive ACL would be needed to make outbound UDP (e.g. a DNS query
+            from an internal host to an external resolver) fully stateful.
+            That's out of scope here and left as a known limitation rather than
+            solved with an overly broad permit rule.
+          </div>
+
+          <h3>ACL 130 — Extended, Guest VLAN isolation</h3>
+          <div class="cfg-head">
+            <span>L3-Switch, interface Vlan30, inbound</span
+            ><span>full ruleset</span>
+          </div>
+          <pre class="block">
+access-list 130 deny ip 10.10.8.0 0.0.0.255 10.10.0.0 0.0.255.255
+access-list 130 permit ip any any</pre
+          >
+          <div class="tbl-wrap">
+            <table>
+              <tr>
+                <th>Line</th>
+                <th>Rule</th>
+                <th>Effect</th>
+              </tr>
+              <tr>
+                <td>1</td>
+                <td class="mono">
+                  deny ip 10.10.8.0 0.0.0.255 10.10.0.0 0.0.255.255
+                </td>
+                <td>
+                  Blocks Guest (10.10.8.0/24) from reaching <i>any</i>
+                  address in 10.10.0.0/16 — every VLAN, every branch, every
+                  server on the internal network
+                </td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td class="mono">permit ip any any</td>
+                <td>
+                  Everything else (i.e. the internet path out through
+                  DataCenter-R6's NAT) is allowed — without this explicit
+                  permit, the implicit deny-all at the end of every ACL would
+                  also block Guest's internet access, which defeats the point of
+                  a guest network
+                </td>
+              </tr>
+            </table>
+          </div>
+          <p>
+            This is a standard-ACL-shaped rule written as extended, because the
+            match needs both a specific source (Guest's subnet) and a specific
+            destination range (internal only) — a standard ACL can only filter
+            on source, which would mean blocking Guest from everything,
+            including the internet, or nothing at all.
+          </p>
+
+          <h3>Verifying any ACL — the commands, not just the config</h3>
+          <div class="cfg-head">
+            <span>show access-lists &lt;name-or-number&gt;</span>
+          </div>
+          <pre class="block">
+Extended IP access list INBOUND-FILTER
+    10 permit tcp any host 203.0.113.10
+    20 permit udp any host 203.0.113.10
+    30 permit icmp any host 203.0.113.10 (4 match(es))
+    35 permit icmp any host 203.0.113.2 echo-reply (5 match(es))
+    36 permit tcp any host 203.0.113.2 established
+    40 deny ip any any (29 match(es))</pre
+          >
+          <p style="font-size: 0.88em">
+            The match counters are the actual proof an ACL is doing what it's
+            supposed to — a rule showing zero matches after traffic that should
+            have hit it is a stronger signal than the config looking correct on
+            paper. This exact output (deny-all climbing while a permit line sat
+            at zero) is what confirmed
+            <a href="#troubleshoot">Troubleshooting #7</a>.
+          </p>
+        </div>
+
         <div class="section" id="stats">
-          <h2><span class="idx">13</span>Implementation Statistics</h2>
+          <h2><span class="idx">15</span>Implementation Statistics</h2>
           <div class="grid2">
             <div class="chart-card">
               <h4>Requirement coverage</h4>
@@ -2420,7 +3320,210 @@ Pro Inside global   Inside local   Outside local  Outside global
 
         <!-- TESTING -->
         <div class="section" id="testing">
-          <h2><span class="idx">14</span>Testing Log</h2>
+          <h2><span class="idx">16</span>Testing Methodology</h2>
+          <p class="section-desc">
+            The quick-reference results table further down summarizes every
+            test; this part is the actual step-by-step procedure behind the ones
+            that need more than a single ping to verify properly.
+          </p>
+
+          <h3>Method 1 — OSPF adjacency and route propagation</h3>
+          <ol>
+            <li>
+              On each OSPF-speaking router:
+              <span class="mono">show ip ospf neighbor</span> — every expected
+              neighbor should show state <span class="mono">FULL</span>.
+            </li>
+            <li>
+              On any router: <span class="mono">show ip route ospf</span> —
+              confirm every remote site's LAN subnet appears, including
+              Branch4's (proves redistribution, not just adjacency).
+            </li>
+            <li>
+              Ping a host on a remote branch from a host on a different branch
+              (not just to/from HQ) to confirm end-to-end reachability, not just
+              router-to-router.
+            </li>
+          </ol>
+          <div class="cfg-head"><span>Expected</span></div>
+          <pre class="block">
+Neighbor ID     Pri   State           Dead Time   Address         Interface
+10.10.7.13        1   FULL/  -        00:00:38    10.10.7.13      Serial0/0/0
+...
+O    10.10.5.0/24 [110/xx] via 10.10.7.17, DataCenter-R6   &lt;- Branch4, via redistribution</pre
+          >
+
+          <h3>Method 2 — WAN failover</h3>
+          <ol>
+            <li>
+              <span class="mono">show ip route ospf</span> on Branch1-R2 —
+              confirm the primary link (cost 64) is the active path.
+            </li>
+            <li>
+              On HQ-R1 or Branch1-R2, <span class="mono">shutdown</span> the
+              primary serial interface.
+            </li>
+            <li>
+              Re-run <span class="mono">show ip route ospf</span> — the backup
+              path (cost 100) should now be the only entry.
+            </li>
+            <li>
+              <span class="mono">no shutdown</span> the primary again and
+              confirm OSPF prefers it back automatically — failback, not just
+              failover, has to be proven too.
+            </li>
+          </ol>
+
+          <h3>Method 3 — Guest VLAN isolation (two-direction proof)</h3>
+          <ol>
+            <li>
+              From Guest-Lap1, ping at least two different internal addresses
+              across two different subnets (e.g. 10.10.0.10 and 10.10.6.2) — a
+              single failed ping could be a routing fluke, not proof of an ACL.
+            </li>
+            <li>
+              Confirm the failure pattern is
+              <span class="mono">Destination host unreachable</span> from the
+              Guest gateway (10.10.8.1) itself, not a plain
+              <span class="mono">Request timed out</span> — the former proves
+              the ACL blocked it locally; the latter would mean the packet left
+              and something else failed downstream.
+            </li>
+            <li>
+              From the same device, ping an address clearly outside 10.10.0.0/16
+              (e.g. an ISP-side interface) and confirm success — a Guest device
+              that can't reach anything at all isn't "isolated," it's just
+              broken.
+            </li>
+            <li>
+              On L3-Switch, <span class="mono">show access-lists 130</span> and
+              confirm the deny line's match counter increased after step 1.
+            </li>
+          </ol>
+
+          <h3>Method 4 — NAT / PAT verification (not just "it browses")</h3>
+          <ol>
+            <li>
+              From an internal PC, initiate a ping or HTTP request toward an
+              external-side address.
+            </li>
+            <li>
+              On DataCenter-R6,
+              <span class="mono">show ip nat translations</span> — a dynamic
+              entry should appear mapping the internal host's IP:port to the
+              outside interface's public IP.
+            </li>
+            <li>
+              <span class="mono">debug ip nat</span> during a live ping shows
+              the translation happening in both directions in real time — this
+              is stronger proof than a static translations table, since it shows
+              the actual packet-by-packet rewrite.
+            </li>
+          </ol>
+
+          <h3>Method 5 — Static NAT and public reachability</h3>
+          <ol>
+            <li>
+              From Rmt-PC (outside the internal network), ping or browse to
+              Server2's public IP (203.0.113.10) — should succeed.
+            </li>
+            <li>
+              From the same device, ping DataCenter-R6's own public IP
+              (203.0.113.2) — should <b>fail</b> with
+              <span class="mono">Destination host unreachable</span>. This is
+              not a bug: only Server2 is meant to be internet-reachable, not the
+              router's own interface (see the ruleset in
+              <a href="#acl-ref">Complete ACL Reference</a>).
+            </li>
+            <li>
+              On DataCenter-R6,
+              <span class="mono">show ip nat translations</span> — the static
+              entry for 10.10.6.3 ↔ 203.0.113.10 should be permanently present
+              (unlike PAT's dynamic entries, it doesn't expire).
+            </li>
+          </ol>
+
+          <h3>Method 6 — DHCP, every pool independently</h3>
+          <ol>
+            <li>
+              For each subnet with a helper-address pool: switch one PC from
+              static to DHCP, confirm the assigned IP falls inside that pool's
+              planned range, and confirm gateway/DNS match the plan.
+            </li>
+            <li>
+              For Branch4 and Guest (local pools, no helper-address): repeat the
+              same check, and additionally confirm those clients still work with
+              the WAN link to the central DHCP server (Server1) disconnected or
+              down — this is the actual point of a local pool, so it should be
+              tested under that condition, not just under normal conditions.
+            </li>
+          </ol>
+
+          <h3>Method 7 — Application services, by domain name not raw IP</h3>
+          <ol>
+            <li>
+              Confirm DNS alone first: <span class="mono">nslookup</span> or a
+              plain ping to the domain name should resolve to Server2's IP
+              before testing the application on top of it.
+            </li>
+            <li>
+              HTTP: browse to the domain name, not the IP — this proves DNS and
+              HTTP together in one test rather than assuming DNS works because
+              HTTP-by-IP worked.
+            </li>
+            <li>
+              Mail: send from one mailbox to another on different PCs, then
+              confirm receipt on the second PC's inbox, not just a "sent"
+              confirmation on the first.
+            </li>
+            <li>
+              FTP: log in, list the directory, and pull a file with
+              <span class="mono">get</span> — confirm the transferred byte count
+              matches the source file, not just that the transfer "completed."
+            </li>
+          </ol>
+
+          <h3>Method 8 — Wireless join and same-subnet parity</h3>
+          <ol>
+            <li>
+              On each site's wireless client, switch to DHCP over the Wireless0
+              interface and confirm SSID, authentication type, and assigned
+              subnet all match that site's plan.
+            </li>
+            <li>
+              Ping between the wireless client and a wired PC on the same site —
+              should behave identically to two wired PCs on that subnet, proving
+              wireless is a transport-layer difference only, not a separate
+              logical network (Guest is the deliberate exception).
+            </li>
+          </ol>
+
+          <h3>
+            Method 9 — Source-side sanity check (do this first on any failed
+            ping)
+          </h3>
+          <ol>
+            <li>
+              Before investigating the destination, VLAN, or ACL: run
+              <span class="mono">ipconfig</span> on the source device and
+              confirm it actually has a non-zero IP, mask, and gateway.
+            </li>
+            <li>
+              <span class="mono">arp -a</span> on the source — an empty ARP
+              table on a device that's supposedly configured is a strong sign
+              the device never completed its own IP configuration, not that the
+              network is broken.
+            </li>
+          </ol>
+          <div class="note">
+            This method exists because of a real case during the build — see
+            <a href="#troubleshoot">Troubleshooting #6</a>, where a failed ping
+            was initially treated as a target-side (printer/VLAN) issue before
+            <span class="mono">ipconfig</span> on the source revealed the source
+            itself had no IP at all.
+          </div>
+
+          <h3>Quick-reference results</h3>
           <div class="tbl-wrap">
             <table>
               <tr>
@@ -2492,31 +3595,82 @@ Pro Inside global   Inside local   Outside local  Outside global
                   >
                 </td>
               </tr>
+              <tr>
+                <td>Multi-site wireless join</td>
+                <td>Laptop DHCP over AP-HQ / AP-Branch2 / AP-Branch3</td>
+                <td>
+                  <span class="pill pill-ok">Correct per-site subnet</span>
+                </td>
+              </tr>
+              <tr>
+                <td>Guest → internal isolation</td>
+                <td>Guest-Lap1 ping to 10.10.0.10, 10.10.6.2</td>
+                <td>
+                  <span class="pill pill-ok">Destination host unreachable</span>
+                </td>
+              </tr>
+              <tr>
+                <td>Guest → internet path</td>
+                <td>Guest-Lap1 ping to 198.51.100.2</td>
+                <td><span class="pill pill-ok">Reply received</span></td>
+              </tr>
+              <tr>
+                <td>Wired end-device reachability</td>
+                <td>Cross-site ping to Adm-Printer1 (10.10.0.5)</td>
+                <td>
+                  <span class="pill pill-ok"
+                    >Reachable from every site after VLAN fix</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Remote worker DHCP</td>
+                <td>Rmt-PC static→DHCP over Remote-R8</td>
+                <td>
+                  <span class="pill pill-ok"
+                    >172.16.99.2 assigned after mask fix</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Remote worker → company service</td>
+                <td>Rmt-PC ping to 203.0.113.10</td>
+                <td><span class="pill pill-ok">Reply received</span></td>
+              </tr>
+              <tr>
+                <td>Router's own public IP not exposed</td>
+                <td>Rmt-PC ping to 203.0.113.2 (DataCenter-R6 itself)</td>
+                <td>
+                  <span class="pill pill-ok">Correctly blocked, not a bug</span>
+                </td>
+              </tr>
             </table>
           </div>
 
           <h3>Requirement checklist</h3>
           <ul class="checklist">
             <li><b>&#10003;</b>VLSM subnetting</li>
-            <li><b>&#10003;</b>DHCP — server + router</li>
+            <li><b>&#10003;</b>DHCP — server + router (dual model)</li>
             <li><b>&#10003;</b>OSPF + static + redistribution</li>
-            <li><b>&#10003;</b>VLAN + inter-VLAN routing</li>
+            <li><b>&#10003;</b>VLAN + inter-VLAN routing (L3 SVI)</li>
+            <li><b>&#10003;</b>Guest VLAN with ACL isolation</li>
             <li><b>&#10003;</b>DNS</li>
             <li><b>&#10003;</b>HTTP</li>
             <li><b>&#10003;</b>Email (SMTP/POP3)</li>
             <li><b>&#10003;</b>FTP</li>
-            <li><b>&#10003;</b>Wireless AP (WPA2)</li>
-            <li><b>&#10003;</b>NAT (PAT + static)</li>
+            <li><b>&#10003;</b>Wireless AP (WPA2) — 5 APs</li>
+            <li><b>&#10003;</b>NAT (PAT + static) with hardened ACL</li>
             <li><b>&#10003;</b>ACL / firewall</li>
             <li><b>&#10003;</b>WAN redundancy</li>
+            <li><b>&#10003;</b>Remote access simulation (dynamic DHCP)</li>
           </ul>
         </div>
 
         <!-- TROUBLESHOOTING -->
         <div class="section" id="troubleshoot">
-          <h2><span class="idx">15</span>Troubleshooting</h2>
+          <h2><span class="idx">17</span>Troubleshooting</h2>
           <p class="section-desc">
-            Four real issues hit during the build, kept here with the actual
+            Eight real issues hit during the build, kept here with the actual
             diagnosis path rather than just the fix — this is what the debugging
             looked like at the time.
           </p>
@@ -2575,35 +3729,163 @@ ip route 172.16.99.0 255.255.255.0 198.51.100.2</pre
             immediately.
           </p>
 
+          <h3>5. New wired port left on default VLAN 1</h3>
+          <p>
+            Adm-Printer1 was cabled to Access-SW1 Fa0/6 with correct static
+            IP/gateway on the device side, but every ping timed out.
+            <span class="mono">show mac address-table</span> on Access-SW1
+            showed the printer's MAC learned under
+            <span class="mono">VLAN 1</span>, not VLAN 10 — the port had never
+            been explicitly assigned:
+          </p>
+          <pre class="block">
+   1    0002.1778.19c0    DYNAMIC     Fa0/6   &lt;- wrong VLAN</pre
+          >
+          <p>
+            VLAN 1 has no SVI/gateway configured on L3-Switch, so anything left
+            there is unreachable no matter how correct its own IP config is.
+            Fixed with:
+          </p>
+          <pre class="block">
+interface FastEthernet0/6
+ switchport mode access
+ switchport access vlan 10</pre
+          >
           <div class="success">
-            All four were isolated with standard tools —
+            After the fix, <span class="mono">show mac address-table</span>
+            showed the same MAC re-learned under VLAN 10, and cross-site pings
+            to the printer succeeded.
+          </div>
+
+          <h3>
+            6. Source device itself had no IP — misread as a target-side fault
+          </h3>
+          <p>
+            While reachability-testing the printer, Adm-PC2 alone couldn't reach
+            it even though every other site could.
+            <span class="mono">arp -a</span> on Adm-PC2 showed no ARP entries at
+            all, and <span class="mono">ipconfig</span> revealed why:
+          </p>
+          <pre class="block">
+IPv4 Address...: 0.0.0.0
+Subnet Mask.....: 0.0.0.0
+Default Gateway.: 0.0.0.0</pre
+          >
+          <p>
+            The failure wasn't on the printer's end at all — Adm-PC2 itself had
+            never actually completed a DHCP lease. Re-selecting DHCP on Adm-PC2
+            fixed it immediately.
+          </p>
+          <div class="note">
+            <b>General rule applied afterward:</b> when a ping fails, check the
+            <i>source's</i> own IP configuration before assuming the
+            destination, VLAN, or ACL is at fault — an unconfigured source is an
+            easy thing to overlook once the destination side has already been
+            triple-checked.
+          </div>
+
+          <h3>
+            7. ACL blocked the router's own return traffic (not the Guest ACL)
+          </h3>
+          <p>
+            After building INBOUND-FILTER, DataCenter-R6 could no longer ping
+            its own upstream neighbor:
+          </p>
+          <pre class="block">
+DataCenter-R6#ping 198.51.100.2
+Success rate is 0 percent (0/5)</pre
+          >
+          <p>
+            <span class="mono">show access-lists</span> showed the deny-all line
+            absorbing every reply — the original ACL only permitted traffic
+            <i>to</i> 203.0.113.10 (Server2); it had no rule at all for traffic
+            returning to the router's <i>own</i> address (203.0.113.2), which is
+            exactly what echo-replies and PAT-return traffic are addressed to.
+            This wasn't a Guest VLAN issue and wasn't caught by the earlier
+            ACL/NAT placement fix — it was a second, separate gap in the same
+            ACL. Fixed by inserting targeted permit lines ahead of the deny-all
+            (full rule set in <a href="#security">NAT &amp; Security</a>):
+          </p>
+          <pre class="block">
+ip access-list extended INBOUND-FILTER
+ 35 permit icmp any host 203.0.113.2 echo-reply
+ 36 permit tcp any host 203.0.113.2 established</pre
+          >
+          <div class="success">
+            <span class="mono">ping 198.51.100.2</span> returned 5/5 success
+            immediately after, and the match counter on line 35 confirmed the
+            new rule — not a coincidence — was catching the traffic.
+          </div>
+
+          <h3>8. DHCP pool configured, but no client ever got a lease</h3>
+          <p>
+            Remote-R8's <span class="mono">HOME-POOL</span> pool looked correct
+            in <span class="mono">show ip dhcp pool</span> — 254 addresses, 1
+            excluded, zero errors — yet Rmt-PC's DHCP request failed every time,
+            silently, with no error on the router side. The device-info panel
+            for Remote-R8 showed the actual mismatch:
+          </p>
+          <pre class="block">
+GigabitEthernet0/1   Up   172.16.99.1/16   &lt;- interface mask
+ip dhcp pool HOME-POOL
+ network 172.16.99.0 255.255.255.0        &lt;- pool mask (/24)</pre
+          >
+          <p>
+            The DHCP pool's subnet has to match the interface's actual mask
+            exactly. The interface had been left at a classful /16 while the
+            pool was configured for /24 — a mismatch that produces no error
+            message on either side, it just never leases anything. Fixed by
+            re-applying the interface with the correct mask:
+          </p>
+          <pre class="block">
+interface GigabitEthernet0/1
+ ip address 172.16.99.1 255.255.255.0</pre
+          >
+          <div class="success">
+            Rmt-PC's next DHCP request returned
+            <span class="mono">DHCP request successful</span> with 172.16.99.2
+            assigned — confirming this was a silent mask-mismatch, not a broken
+            pool.
+          </div>
+
+          <div class="success">
+            All eight were isolated with standard tools —
             <span class="mono">show ip interface brief</span>,
             <span class="mono">show ip route</span>,
             <span class="mono">debug ip nat</span>,
-            <span class="mono">show access-lists</span> — rather than by
-            re-typing configuration until something worked.
+            <span class="mono">show access-lists</span>,
+            <span class="mono">show mac address-table</span>,
+            <span class="mono">arp -a</span>,
+            <span class="mono">ipconfig</span> — rather than by re-typing
+            configuration until something worked.
           </div>
         </div>
 
         <!-- CONCLUSION -->
         <div class="section" id="conclusion">
-          <h2><span class="idx">16</span>Conclusion</h2>
+          <h2><span class="idx">18</span>Conclusion</h2>
           <p>
             Every requirement on the lab checklist was configured and then
             verified live — not just typed in and assumed working. DHCP
             assignment was watched happen on an actual PC, DNS resolution was
             watched feed into a real browser session, mail was sent from one PC
             and read on another, a file was actually pulled over FTP with a byte
-            count and transfer speed, a wireless laptop picked up the right
-            subnet over the air, and NAT/ACL behavior was confirmed with debug
-            output rather than a screenshot of a config that might not be doing
-            what it looks like.
+            count and transfer speed, five wireless laptops each picked up the
+            right subnet over the air, a Guest device was proven blocked from
+            the internal network and still able to reach the internet, and
+            NAT/ACL behavior was confirmed with debug output and match counters
+            rather than a screenshot of a config that might not be doing what it
+            looks like.
           </p>
           <p>
-            The four issues in the troubleshooting log weren't edited out —
+            The eight issues in the troubleshooting log weren't edited out —
             they're left in because they're the parts that actually took time
-            and forced a real understanding of how NAT, ACLs, and routing
-            interact, rather than following a script.
+            and forced a real understanding of how NAT, ACLs, VLANs, and DHCP
+            interact, rather than following a script. Two of them (#6 and #7)
+            turned out to be entirely different root causes than they first
+            looked like — a lesson in checking the source before the
+            destination, and in not assuming a fixed bug can't recur in a new
+            form.
           </p>
         </div>
 
@@ -2665,10 +3947,10 @@ ip route 172.16.99.0 255.255.255.0 198.51.100.2</pre
       new Chart(document.getElementById("deviceChart"), {
         type: "doughnut",
         data: {
-          labels: ["Routers", "Switches", "Servers", "PC/Laptop", "AP"],
+          labels: ["Routers", "Switches", "Servers", "PC/Laptop/Printer", "AP"],
           datasets: [
             {
-              data: [8, 7, 2, 17, 1],
+              data: [8, 7, 2, 20, 5],
               backgroundColor: [navy, blue, coral, green, amber],
             },
           ],
@@ -2686,11 +3968,21 @@ ip route 172.16.99.0 255.255.255.0 198.51.100.2</pre
       new Chart(document.getElementById("hostChart"), {
         type: "bar",
         data: {
-          labels: ["HQ", "Br1", "Br2", "Br3", "Br4", "DC", "Rmt"],
+          labels: [
+            "HQ-Adm",
+            "HQ-IT",
+            "HQ-Guest",
+            "Br1",
+            "Br2",
+            "Br3",
+            "Br4",
+            "DC",
+            "Rmt",
+          ],
           datasets: [
             {
               label: "Hosts",
-              data: [3, 4, 4, 3, 2, 2, 1],
+              data: [3, 2, 1, 4, 4, 3, 2, 2, 1],
               backgroundColor: navy,
             },
           ],
@@ -2722,19 +4014,21 @@ ip route 172.16.99.0 255.255.255.0 198.51.100.2</pre
             "DHCP",
             "Routing",
             "VLAN",
+            "Guest ACL",
             "DNS",
             "HTTP",
             "Email",
             "FTP",
-            "AP",
+            "AP (x5)",
             "NAT",
             "ACL",
             "Redund.",
+            "Remote DHCP",
           ],
           datasets: [
             {
               label: "Done",
-              data: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+              data: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
               backgroundColor: green,
             },
           ],
@@ -2755,13 +4049,13 @@ ip route 172.16.99.0 255.255.255.0 198.51.100.2</pre
         type: "pie",
         data: {
           labels: [
-            "/24 LAN (7)",
-            "/30 WAN (6)",
+            "/24 LAN (8)",
+            "/30 WAN (7)",
             "/30 ISP (2)",
             "Remote /24 (1)",
           ],
           datasets: [
-            { data: [7, 6, 2, 1], backgroundColor: [navy, blue, coral, amber] },
+            { data: [8, 7, 2, 1], backgroundColor: [navy, blue, coral, amber] },
           ],
         },
         options: {
